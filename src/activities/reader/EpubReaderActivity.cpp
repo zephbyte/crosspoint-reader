@@ -1096,6 +1096,14 @@ void EpubReaderActivity::reindexCurrentSection() {
     RenderLock lock(*this);
     GUI.drawPopup(renderer, tr(STR_INDEXING));
     if (section) {
+      cachedSpineIndex = currentSpineIndex;
+      cachedChapterTotalPageCount = section->pageCount;
+      nextPageNumber = section->currentPage;
+    }
+    section.reset();
+  }
+  requestUpdate();
+}
 
 void EpubReaderActivity::openFileTransfer() {
   if (epub && section) {
