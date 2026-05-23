@@ -713,8 +713,8 @@ void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layou
 }
 
 void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
-                              const int pageCount, std::string title, const int paddingBottom, const int textYOffset,
-                              const bool isPageBookmarked) const {
+                              const int pageCount, std::string title, const int paddingBottom,
+                              const int textYOffset, const bool isPageBookmarked, const bool exploring) const {
   auto metrics = UITheme::getInstance().getMetrics();
   int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
@@ -723,6 +723,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   // Draw Progress Text
   const auto screenHeight = renderer.getScreenHeight();
   auto textY = screenHeight - UITheme::getInstance().getStatusBarHeight() - orientedMarginBottom - paddingBottom - 4;
+  const int origTextY = textY;  // captured before the title block may shift textY for textYOffset
   int progressTextWidth = 0;
 
   if (SETTINGS.statusBarBookProgressPercentage || SETTINGS.statusBarChapterPageCount) {
@@ -805,6 +806,12 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
 
   // Draw Title
   if (!title.empty()) {
+    if (exploring) {
+      // Format string (not concatenation) so translators can reorder the title relative to the prefix.
+      char buf[256];
+      snprintf(buf, sizeof(buf), tr(STR_EXPLORING_FMT), title.c_str());
+      title = buf;
+    }
     textY -= textYOffset;
     // Centered chapter title text
     // Page width minus existing content with 30px padding on each side
@@ -837,6 +844,15 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
                       titleMarginLeftAdjusted + metrics.statusBarHorizontalMargin + orientedMarginLeft +
                           (availableTitleSpace - titleWidth) / 2,
                       textY, title.c_str());
+  }
+
+  // Inverts the status bar strip last so every element drawn above flips uniformly.
+  // min(origTextY, textY) covers cases where the title was shifted up by textYOffset.
+  if (exploring) {
+    const int barTop = std::min(origTextY, textY) - 2;
+    renderer.invertRect(orientedMarginLeft, barTop,
+                        renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight,
+                        screenHeight - orientedMarginBottom - paddingBottom - barTop);
   }
 }
 

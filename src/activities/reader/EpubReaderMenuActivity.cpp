@@ -76,9 +76,11 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
                                                const bool hasFootnotes, const bool hasBookmarks,
                                                const bool isCurrentPageBookmarked, const bool isBookCompleted,
                                                const bool autoPageTurnActive,
-                                               const uint16_t autoPageTurnIntervalSeconds)
+                                               const uint16_t autoPageTurnIntervalSeconds,
+                                               const bool hasReturnPoint, std::string returnLabel)
     : Activity("EpubReaderMenu", renderer, mappedInput),
-      menuItems(buildMenuItems(hasFootnotes, hasBookmarks, isCurrentPageBookmarked, isBookCompleted)),
+      menuItems(buildMenuItems(hasFootnotes, hasBookmarks, isCurrentPageBookmarked, isBookCompleted, hasReturnPoint)),
+      returnLabel(std::move(returnLabel)),
       title(title),
       pendingOrientation(currentOrientation),
       currentPage(currentPage),
@@ -90,11 +92,17 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
 std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes,
                                                                                      bool hasBookmarks,
                                                                                      bool isCurrentPageBookmarked,
-                                                                                     bool isBookCompleted) {
+                                                                                     bool isBookCompleted,
+                                                                                     bool hasReturnPoint) {
   std::vector<MenuItem> items;
   constexpr size_t baseItemCount = 14;
-  const size_t totalItemCount = baseItemCount + (hasFootnotes ? 1u : 0u) + (hasBookmarks ? 2u : 0u);
+  const size_t totalItemCount =
+      baseItemCount + (hasFootnotes ? 1u : 0u) + (hasBookmarks ? 2u : 0u) + (hasReturnPoint ? 2u : 0u);
   items.reserve(totalItemCount);
+  if (hasReturnPoint) {
+    items.push_back({MenuAction::RETURN_TO_PREVIOUS, StrId::STR_RETURN_TO_PREVIOUS});
+    items.push_back({MenuAction::CANCEL_RETURN, StrId::STR_CANCEL_RETURN});
+  }
   if (hasFootnotes) {
     items.push_back({MenuAction::FOOTNOTES, StrId::STR_FOOTNOTES});
   }
@@ -212,7 +220,13 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
 
   GUI.drawList(
       renderer, Rect{screen.x, contentTop, screen.width, contentHeight}, menuItems.size(), selectedIndex,
-      [this](int index) { return I18N.get(menuItems[index].labelId); }, nullptr, nullptr,
+      [this](int index) -> std::string {
+        if (menuItems[index].action == MenuAction::RETURN_TO_PREVIOUS && !returnLabel.empty()) {
+          return returnLabel;
+        }
+        return I18N.get(menuItems[index].labelId);
+      },
+      nullptr, nullptr,
       [this](int index) -> std::string {
         const auto value = menuItems[index].action;
         if (value == MenuAction::ROTATE_SCREEN) {

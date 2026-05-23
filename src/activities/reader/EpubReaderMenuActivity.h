@@ -30,7 +30,9 @@ class EpubReaderMenuActivity final : public Activity {
     CONTROLS_OPTIONS,
     BOOKMARK_TOGGLE,
     VIEW_BOOKMARKS,
-    DELETE_BOOKMARKS
+    DELETE_BOOKMARKS,
+    RETURN_TO_PREVIOUS,
+    CANCEL_RETURN
   };
 
   explicit EpubReaderMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title,
@@ -38,7 +40,8 @@ class EpubReaderMenuActivity final : public Activity {
                                   const uint8_t currentOrientation, const bool hasFootnotes, const bool hasBookmarks,
                                   const bool isCurrentPageBookmarked, const bool isBookCompleted,
                                   const bool autoPageTurnActive = false,
-                                  const uint16_t autoPageTurnIntervalSeconds = 0);
+                                  const uint16_t autoPageTurnIntervalSeconds = 0,
+                                  const bool hasReturnPoint = false, std::string returnLabel = {});
 
   void onEnter() override;
   void onExit() override;
@@ -54,12 +57,15 @@ class EpubReaderMenuActivity final : public Activity {
   };
 
   static std::vector<MenuItem> buildMenuItems(bool hasFootnotes, bool hasBookmarks, bool isCurrentPageBookmarked,
-                                              bool isBookCompleted);
+                                              bool isBookCompleted, bool hasReturnPoint);
 
   // Fixed menu layout
   const std::vector<MenuItem> menuItems;
 
   int selectedIndex = 0;
+
+  // Optional override for RETURN_TO_PREVIOUS; empty falls back to the static i18n string.
+  std::string returnLabel;
 
   ButtonNavigator buttonNavigator;
   std::string title = "Reader Menu";
