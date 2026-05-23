@@ -824,11 +824,12 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       startActivityForResult(
           std::make_unique<EpubReaderChapterSelectionActivity>(renderer, mappedInput, epub, path, spineIdx),
           [this, snapshotSpine, snapshotPage, snapshotPageCount](const ActivityResult& result) {
-            if (!result.isCancelled && currentSpineIndex != std::get<ChapterResult>(result.data).spineIndex) {
+            if (!result.isCancelled) {
+              const int selectedSpine = std::get<ChapterResult>(result.data).spineIndex;
               RenderLock lock(*this);
               captureReturnPointIfAbsent(snapshotSpine, snapshotPage, snapshotPageCount);
               footnoteDepth = 0;
-              currentSpineIndex = std::get<ChapterResult>(result.data).spineIndex;
+              currentSpineIndex = selectedSpine;
               nextPageNumber = 0;
               section.reset();
             }
