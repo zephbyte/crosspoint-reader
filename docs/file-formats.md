@@ -219,3 +219,28 @@ if (parsedSize != fileSize) {
     std::warning(std::format("Unparsed data detected: {} bytes remaining at offset 0x{:X}", fileSize - parsedSize, parsedSize));
 }
 ```
+
+## `returnPoint.bin`
+
+Written by Explore Mode in `EpubReaderUtils::saveReturnPoint` (see
+`src/activities/reader/EpubReaderUtils.h`). One per EPUB, lives in the
+book's cache directory. Holds the position the reader was at when the
+user made a qualifying jump from the quick menu, so they can return to
+it later (across sleep, reboot, or reopen).
+
+Six bytes, little-endian, no version header (matches `progress.bin`'s
+tiny-status-file precedent):
+
+| Offset | Size | Field         | Notes                                  |
+|-------:|-----:|---------------|----------------------------------------|
+| 0      | 2    | `spineIndex`  | uint16, index into the epub spine      |
+| 2      | 2    | `pageNumber`  | uint16, page within that spine item    |
+| 4      | 2    | `pageCount`   | uint16, page count at capture time     |
+
+The loader discards the file if it is short, if the spine index is out
+of range for the current epub, or if Explore Mode has been turned off
+since the last write. `pageCount` is captured so the reader can
+proportionally remap `pageNumber` if the section has been re-laid-out
+since (e.g. font or line-height change between capture and return).
+A captured `pageCount` of `0` is intentional in the footnote-anchored
+path and disables remap.
