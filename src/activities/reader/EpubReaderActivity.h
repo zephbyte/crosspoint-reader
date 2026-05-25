@@ -65,6 +65,7 @@ class EpubReaderActivity final : public Activity {
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
   void pageTurn(bool isForwardTurn);
 
+  EpubReaderUtils::ReturnPoint computePreJumpSnapshot() const;
   // Caller must hold RenderLock.
   std::optional<EpubReaderUtils::ReturnPoint> captureReturnPointIfAbsent(int spineIndex, int pageNumber, int pageCount);
   // Caller must NOT hold RenderLock.
