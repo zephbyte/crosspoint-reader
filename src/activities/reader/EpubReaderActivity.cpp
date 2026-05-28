@@ -444,18 +444,6 @@ void EpubReaderActivity::jumpToPercent(int percent) {
 }
 
 void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action) {
-  auto progressChangeResultHandler = [this](const ActivityResult& result) {
-    if (!result.isCancelled) {
-      const auto& sync = std::get<ProgressChangeResult>(result.data);
-      if (currentSpineIndex != sync.spineIndex || (section && section->currentPage != sync.page)) {
-        RenderLock lock(*this);
-        currentSpineIndex = sync.spineIndex;
-        nextPageNumber = sync.page;
-        section.reset();
-      }
-    }
-  };
-
   switch (action) {
     case EpubReaderMenuActivity::MenuAction::SELECT_CHAPTER: {
       const int spineIdx = currentSpineIndex;
@@ -614,9 +602,23 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
     case EpubReaderMenuActivity::MenuAction::BOOKMARKS: {
+      const auto snapshot = computePreJumpSnapshot();
       startActivityForResult(
           std::make_unique<EpubReaderBookmarksActivity>(renderer, mappedInput, epub, epub->getPath()),
-          progressChangeResultHandler);
+          [this, snapshot](const ActivityResult& result) {
+            if (result.isCancelled) return;
+            const auto& sync = std::get<ProgressChangeResult>(result.data);
+            if (currentSpineIndex == sync.spineIndex && section && section->currentPage == sync.page) return;
+            std::optional<EpubReaderUtils::ReturnPoint> toPersist;
+            {
+              RenderLock lock(*this);
+              toPersist = captureReturnPointIfAbsent(snapshot.spineIndex, snapshot.pageNumber, snapshot.pageCount);
+              currentSpineIndex = sync.spineIndex;
+              nextPageNumber = sync.page;
+              section.reset();
+            }
+            if (toPersist) persistReturnPointToSd(*toPersist);
+          });
       break;
     }
     case EpubReaderMenuActivity::MenuAction::RETURN_TO_PREVIOUS: {
