@@ -621,6 +621,11 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
               toPersist = captureReturnPointIfAbsent(snapshot);
               currentSpineIndex = sync.spineIndex;
               nextPageNumber = sync.page;
+              // Setting these makes render() remap the page proportionally to the current pagination.
+              if (sync.chapterPageCount > 0) {
+                cachedSpineIndex = sync.spineIndex;
+                cachedChapterTotalPageCount = sync.chapterPageCount;
+              }
               section.reset();
             }
             if (toPersist) persistReturnPointToSd(*toPersist);
@@ -633,15 +638,23 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         // layout; toCrossPoint handles font/orientation changes since capture.
         const CrossPointPosition target =
             ProgressMapper::toCrossPoint(epub, {returnPoint->xpath, returnPoint->percentage}, renderer);
+        // Read the saved page anchor before clearReturnPoint() resets returnPoint.
+        const uint16_t savedPage = returnPoint->savedPage;
+        const uint16_t savedPageCount = returnPoint->savedPageCount;
         {
           RenderLock lock(*this);
           clearReturnPoint();
           footnoteDepth = 0;
           currentSpineIndex = target.spineIndex;
-          nextPageNumber = target.pageNumber;
-          // Cached page count lets render() remap proportionally if layout changed since capture.
-          cachedSpineIndex = target.spineIndex;
-          cachedChapterTotalPageCount = target.totalPages;
+          // Prefer the persisted page anchor (remapped proportionally on render); fall back to the
+          // xpath-resolved page when no anchor was recorded (cold-cache footnote capture).
+          if (savedPageCount > 0) {
+            nextPageNumber = savedPage;
+            cachedSpineIndex = target.spineIndex;
+            cachedChapterTotalPageCount = savedPageCount;
+          } else {
+            nextPageNumber = target.pageNumber;
+          }
           section.reset();
         }
         requestUpdate();
@@ -989,6 +1002,11 @@ std::optional<BookmarkEntry> EpubReaderActivity::computePreJumpSnapshot() const 
   entry.xpath = sp.xpath;
   entry.percentage = sp.percentage;
   entry.computedSpineIndex = static_cast<uint16_t>(pos.spineIndex);
+  // totalPages is 0 in the cold-cache footnote path, leaving savedPageCount 0 (xpath fallback).
+  if (pos.pageNumber >= 0 && pos.totalPages > 0) {
+    entry.savedPage = static_cast<uint16_t>(pos.pageNumber);
+    entry.savedPageCount = static_cast<uint16_t>(pos.totalPages);
+  }
   return entry;
 }
 
@@ -1305,6 +1323,10 @@ void EpubReaderActivity::addBookmark() {
   entry.percentage = progress.percentage;
   entry.xpath = progress.xpath;
   entry.summary = BookmarkUtil::sanitizeBookmarkSummary(pageText);
+  if (currentPage >= 0 && pageCount > 0) {
+    entry.savedPage = static_cast<uint16_t>(currentPage);
+    entry.savedPageCount = static_cast<uint16_t>(pageCount);
+  }
 
   // Add bookmark
   const std::string path = BookmarkUtil::getBookmarkPath(epub->getPath());

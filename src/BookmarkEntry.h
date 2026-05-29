@@ -11,4 +11,10 @@ struct BookmarkEntry {
   uint16_t computedSpineIndex = 0;        // Spine index at the time of bookmarking
   uint16_t computedChapterPageCount = 0;  // Total page count of the chapter at the time of bookmarking
   uint16_t computedChapterProgress = 0;   // Number of pages into the chapter at the time of bookmarking
+
+  // Page position at creation. Used to reposition proportionally if the chapter was re-paginated
+  // (font/orientation change) since — more accurate than resolving the xpath alone.
+  // 0 = not recorded (fall back to xpath).
+  uint16_t savedPage = 0;
+  uint16_t savedPageCount = 0;
 };
