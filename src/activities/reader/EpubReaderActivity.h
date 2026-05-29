@@ -5,6 +5,7 @@
 
 #include <optional>
 
+#include "../../BookmarkEntry.h"
 #include "EpubReaderMenuActivity.h"
 #include "EpubReaderUtils.h"
 #include "ProgressMapper.h"
@@ -54,8 +55,10 @@ class EpubReaderActivity final : public Activity {
   int footnoteDepth = 0;
 
   // Captured at the first qualifying jump from the quick menu. Persisted to SD as
-  // returnPoint.bin so it survives sleep/reboot/reopen.
-  std::optional<EpubReaderUtils::ReturnPoint> returnPoint;
+  // returnPoint.json (bookmark format) so it survives sleep/reboot/reopen.
+  // Stored as a resolution-independent xpath; computedSpineIndex is recovered on
+  // load for the "Return to <chapter>" menu label.
+  std::optional<BookmarkEntry> returnPoint;
 
   void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);
@@ -70,11 +73,14 @@ class EpubReaderActivity final : public Activity {
   void pageTurn(bool isForwardTurn);
   void addBookmark();
 
-  EpubReaderUtils::ReturnPoint computePreJumpSnapshot() const;
+  // Builds the pre-jump return point, or nullopt when there is nothing to capture (Explore Mode
+  // off, or a return point already exists). Resolving the xpath streams the chapter twice, so
+  // returning early here keeps menu jumps cheap in the common case. Not under RenderLock.
+  std::optional<BookmarkEntry> computePreJumpSnapshot() const;
   // Caller must hold RenderLock.
-  std::optional<EpubReaderUtils::ReturnPoint> captureReturnPointIfAbsent(int spineIndex, int pageNumber, int pageCount);
+  std::optional<BookmarkEntry> captureReturnPointIfAbsent(const std::optional<BookmarkEntry>& snapshot);
   // Caller must NOT hold RenderLock.
-  void persistReturnPointToSd(const EpubReaderUtils::ReturnPoint& point);
+  void persistReturnPointToSd(const BookmarkEntry& point);
   void clearReturnPoint();
   std::string exploreMenuLabel() const;
 

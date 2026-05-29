@@ -805,7 +805,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   if (!title.empty()) {
     if (exploring) {
       // Format string (not concatenation) so translators can reorder the title relative to the prefix.
-      char buf[256];
+      char buf[128];
       snprintf(buf, sizeof(buf), tr(STR_EXPLORING_FMT), title.c_str());
       title = buf;
     }

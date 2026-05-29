@@ -168,6 +168,12 @@ void EpubReaderActivity::onEnter() {
   // Restore return point if Explore Mode is on; otherwise wipe any stale file from a prior session.
   if (SETTINGS.exploreMode) {
     returnPoint = EpubReaderUtils::loadReturnPoint(*epub);
+    if (returnPoint) {
+      // Recover the spine index from the xpath for the "Return to <chapter>" menu label.
+      const CrossPointPosition pos =
+          ProgressMapper::toCrossPoint(epub, {returnPoint->xpath, returnPoint->percentage}, renderer);
+      returnPoint->computedSpineIndex = static_cast<uint16_t>(pos.spineIndex);
+    }
   } else {
     EpubReaderUtils::clearReturnPoint(*epub);
   }
@@ -454,10 +460,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           [this, snapshot](const ActivityResult& result) {
             if (!result.isCancelled) {
               const auto& chapterResult = std::get<ChapterResult>(result.data);
-              std::optional<EpubReaderUtils::ReturnPoint> toPersist;
+              std::optional<BookmarkEntry> toPersist;
               {
                 RenderLock lock(*this);
-                toPersist = captureReturnPointIfAbsent(snapshot.spineIndex, snapshot.pageNumber, snapshot.pageCount);
+                toPersist = captureReturnPointIfAbsent(snapshot);
                 footnoteDepth = 0;
 
                 currentSpineIndex = chapterResult.spineIndex;
@@ -498,10 +504,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           std::make_unique<EpubReaderPercentSelectionActivity>(renderer, mappedInput, initialPercent),
           [this, snapshot](const ActivityResult& result) {
             if (!result.isCancelled) {
-              std::optional<EpubReaderUtils::ReturnPoint> toPersist;
+              std::optional<BookmarkEntry> toPersist;
               {
                 RenderLock lock(*this);
-                toPersist = captureReturnPointIfAbsent(snapshot.spineIndex, snapshot.pageNumber, snapshot.pageCount);
+                toPersist = captureReturnPointIfAbsent(snapshot);
               }
               if (toPersist) persistReturnPointToSd(*toPersist);
               jumpToPercent(std::get<PercentResult>(result.data).percent);
@@ -609,10 +615,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
             if (result.isCancelled) return;
             const auto& sync = std::get<ProgressChangeResult>(result.data);
             if (currentSpineIndex == sync.spineIndex && section && section->currentPage == sync.page) return;
-            std::optional<EpubReaderUtils::ReturnPoint> toPersist;
+            std::optional<BookmarkEntry> toPersist;
             {
               RenderLock lock(*this);
-              toPersist = captureReturnPointIfAbsent(snapshot.spineIndex, snapshot.pageNumber, snapshot.pageCount);
+              toPersist = captureReturnPointIfAbsent(snapshot);
               currentSpineIndex = sync.spineIndex;
               nextPageNumber = sync.page;
               section.reset();
@@ -623,7 +629,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     }
     case EpubReaderMenuActivity::MenuAction::RETURN_TO_PREVIOUS: {
       if (returnPoint.has_value()) {
-        const auto target = *returnPoint;
+        // Resolve the resolution-independent xpath to a concrete page for the current
+        // layout; toCrossPoint handles font/orientation changes since capture.
+        const CrossPointPosition target =
+            ProgressMapper::toCrossPoint(epub, {returnPoint->xpath, returnPoint->percentage}, renderer);
         {
           RenderLock lock(*this);
           clearReturnPoint();
@@ -632,7 +641,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           nextPageNumber = target.pageNumber;
           // Cached page count lets render() remap proportionally if layout changed since capture.
           cachedSpineIndex = target.spineIndex;
-          cachedChapterTotalPageCount = target.pageCount;
+          cachedChapterTotalPageCount = target.totalPages;
           section.reset();
         }
         requestUpdate();
@@ -952,32 +961,51 @@ bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
   return EpubReaderUtils::saveProgress(*epub, spineIndex, currentPage, pageCount);
 }
 
-EpubReaderUtils::ReturnPoint EpubReaderActivity::computePreJumpSnapshot() const {
-  // pageCount=0 in the footnote path disables proportional remap on return,
-  // which is acceptable for short footnote detours (savedPositions stores
-  // only spine/page, not the pre-footnote section's pageCount).
-  const int spine = (footnoteDepth > 0) ? savedPositions[0].spineIndex : currentSpineIndex;
-  const int page =
-      (footnoteDepth > 0) ? savedPositions[0].pageNumber : (section ? section->currentPage : nextPageNumber);
-  const int pageCount = (footnoteDepth > 0) ? 0 : (section ? section->pageCount : cachedChapterTotalPageCount);
-  return EpubReaderUtils::ReturnPoint{spine, page, pageCount};
-}
-
-std::optional<EpubReaderUtils::ReturnPoint> EpubReaderActivity::captureReturnPointIfAbsent(int spineIndex,
-                                                                                           int pageNumber,
-                                                                                           int pageCount) {
+std::optional<BookmarkEntry> EpubReaderActivity::computePreJumpSnapshot() const {
+  // Nothing to capture: skip the xpath resolution (two chapter streams) entirely.
   if (!SETTINGS.exploreMode || returnPoint.has_value() || !epub) {
     return std::nullopt;
   }
-  returnPoint = EpubReaderUtils::ReturnPoint{spineIndex, pageNumber, pageCount};
+
+  CrossPointPosition pos{};
+  if (footnoteDepth > 0) {
+    // Capture the pre-footnote reading position, not the footnote target itself.
+    // savedPositions stores only spine/page, so recover the chapter's page count
+    // from the section cache to make the generated xpath proportional. Falls back
+    // to chapter start (totalPages=0 -> intra 0) if the cache is cold.
+    pos.spineIndex = savedPositions[0].spineIndex;
+    pos.pageNumber = savedPositions[0].pageNumber;
+    pos.totalPages = 0;
+    Section preFootnote(epub, pos.spineIndex, renderer);
+    if (const auto cachedCount = preFootnote.getCachedPageCount()) {
+      pos.totalPages = *cachedCount;
+    }
+  } else {
+    pos = getCurrentPosition();
+  }
+
+  const SavedProgressPosition sp = ProgressMapper::toSavedProgress(epub, pos);
+  BookmarkEntry entry;
+  entry.xpath = sp.xpath;
+  entry.percentage = sp.percentage;
+  entry.computedSpineIndex = static_cast<uint16_t>(pos.spineIndex);
+  return entry;
+}
+
+std::optional<BookmarkEntry> EpubReaderActivity::captureReturnPointIfAbsent(
+    const std::optional<BookmarkEntry>& snapshot) {
+  // Re-check returnPoint under the lock: it may have been set since the snapshot was computed.
+  if (!snapshot || returnPoint.has_value() || !epub) {
+    return std::nullopt;
+  }
+  returnPoint = snapshot;
   return returnPoint;
 }
 
-void EpubReaderActivity::persistReturnPointToSd(const EpubReaderUtils::ReturnPoint& point) {
+void EpubReaderActivity::persistReturnPointToSd(const BookmarkEntry& point) {
   if (!epub) return;
   if (!EpubReaderUtils::saveReturnPoint(*epub, point)) {
-    LOG_ERR("ERS", "Failed to save return point; disabling Explore return: spine=%d page=%d count=%d", point.spineIndex,
-            point.pageNumber, point.pageCount);
+    LOG_ERR("ERS", "Failed to save return point; disabling Explore return: %s", point.xpath.c_str());
     RenderLock lock(*this);
     clearReturnPoint();
   }
@@ -997,7 +1025,7 @@ std::string EpubReaderActivity::exploreMenuLabel() const {
   if (!returnPoint.has_value() || !epub) {
     return I18N.get(StrId::STR_RETURN_TO_PREVIOUS);
   }
-  const int tocIdx = epub->getTocIndexForSpineIndex(returnPoint->spineIndex);
+  const int tocIdx = epub->getTocIndexForSpineIndex(returnPoint->computedSpineIndex);
   if (tocIdx < 0) {
     return I18N.get(StrId::STR_RETURN_TO_PREVIOUS);
   }
@@ -1006,7 +1034,7 @@ std::string EpubReaderActivity::exploreMenuLabel() const {
     return I18N.get(StrId::STR_RETURN_TO_PREVIOUS);
   }
   // Format string so translators can reorder the title relative to the prefix.
-  char buf[256];
+  char buf[128];
   snprintf(buf, sizeof(buf), I18N.get(StrId::STR_RETURN_FMT), tocItem.title.c_str());
   return std::string(buf);
 }
